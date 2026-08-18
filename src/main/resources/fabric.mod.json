@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "yawpbluebridge",
+  "version": "${version}",
+  "name": "YawpBlueBridge",
+  "description": "",
+  "authors": [
+    "Gwaja32"
+  ],
+  "contact": {
+    "repo": "https://github.com/user/YawpBlueBridge"
+  },
+  "license": "MIT",
+  "icon": "assets/yawpbluebridge/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "client": [
+    ],
+    "main": [
+      "kr.haruserver.yawpbluebridge.YawpBlueBridge"
+    ]
+  },
+  "mixins": [
+    "yawpbluebridge.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version}",
+    "bluemap": "*",
+    "yawp": "*"
+  }
+}
