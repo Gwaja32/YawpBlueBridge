@@ -147,7 +147,7 @@ public class YawpBlueBridge implements ModInitializer {
             JsonObject data = GSON.fromJson(reader, JsonObject.class);
             String id = data.get("id").getAsString();
             String label = data.get("label").getAsString();
-            String playerName = data.has("playerName") ? data.get("playerName").getAsString() : "Unknown";
+            String playerName = data.has("currentNickname") ? data.get("currentNickname").getAsString() : "Unknown";
             String worldStr = data.has("world") ? data.get("world").getAsString() : "minecraft:overworld";
 
             // 1. 좌표 정밀 계산 (Double.MIN_VALUE 버그 수정 버전)
@@ -390,7 +390,7 @@ public class YawpBlueBridge implements ModInitializer {
                     // YAWP API 사양에 따라 새로운 Container를 put 할 수 있는지 확인
                     members = new PlayerContainer("members");
                     try {
-                        groups.put("members", members);
+                        region.getGroups().put("members", members);
                     } catch (UnsupportedOperationException e) {
                         return;
                     }
@@ -401,7 +401,7 @@ public class YawpBlueBridge implements ModInitializer {
                 PlayerContainer owners = groups.get("owners");
                 if (owners == null) {
                     owners = new PlayerContainer("owners");
-                    groups.put("owners", owners);
+                    region.getGroups().put("owners", owners);
                 }
                 owners.addPlayer(profile.id(), profile.name());
 
