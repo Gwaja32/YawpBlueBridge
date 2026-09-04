@@ -119,6 +119,7 @@ public class YawpBlueBridge implements ModInitializer {
                     if (path.endsWith("update-marker") && "POST".equalsIgnoreCase(method)) handleUpdateMarker(exchange);
                     else if (path.endsWith("delete-marker") && "DELETE".equalsIgnoreCase(method)) handleDeleteMarker(exchange);
                     else if (path.endsWith("add-member") && "POST".equalsIgnoreCase(method)) handleAddMember(exchange);
+                    else if (path.endsWith("paste-member") && "POST".equalsIgnoreCase(method)) handlePasteMember(exchange);
                     else if (path.endsWith("remove-member") && "POST".equalsIgnoreCase(method)) handleRemoveMember(exchange);
                     else if (path.endsWith("get-area-info") && "GET".equalsIgnoreCase(method)) handleGetAreaInfo(exchange);
                     else if (path.endsWith("update-area") && "POST".equalsIgnoreCase(method)) handleUpdateArea(exchange);
@@ -149,6 +150,9 @@ public class YawpBlueBridge implements ModInitializer {
             String label = data.get("label").getAsString();
             String playerName = data.has("currentNickname") ? data.get("currentNickname").getAsString() : "Unknown";
             String worldStr = data.has("world") ? data.get("world").getAsString() : "minecraft:overworld";
+            JsonArray flagsArray = data.has("flags") && data.get("flags").isJsonArray()
+                    ? data.getAsJsonArray("flags")
+                    : null;
 
             // 1. 좌표 정밀 계산 (Double.MIN_VALUE 버그 수정 버전)
             List<Vector2d> bmPoints = new ArrayList<>();
@@ -210,9 +214,43 @@ public class YawpBlueBridge implements ModInitializer {
             // 3. 블루맵 업데이트 (성공 시)
             if (mainThreadFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)) {
                 syncAllBlueMapLayers(id, label, bmPoints, effectiveWorld);
+                setDefaultFlag(id, flagsArray);
                 sendResponse(exchange, "{\"success\":true}", 200);
             } else {
                 sendResponse(exchange, "{\"error\":\"World Not Found\"}", 404);
+            }
+        }
+    }
+
+    private void setDefaultFlag(String id, JsonArray flagsArray) {
+        for (var worldKey : this.minecraftServer.levelKeys()) {
+            String worldName = worldKey.identifier().toString();
+            var apiOpt = RegionManager.get().getDimRegionApiByKey(worldName);
+
+            if (apiOpt.isPresent() && apiOpt.get().hasLocal(id)) {
+                IMarkableRegion region = apiOpt.get().getLocalRegion(id).orElseThrow();
+
+                // --- [YAWP 플래그 수정 로직] ---
+                List<String> flagsToRemove = new ArrayList<>(region.getFlags().getFlagMap().keySet());
+                for (String flagName : flagsToRemove) {
+                    region.removeFlag(flagName);
+                }
+
+                if (flagsArray != null) {
+                    for (JsonElement element : flagsArray) {
+                        JsonObject fObj = element.getAsJsonObject();
+                        String flagId = fObj.get("id").getAsString();
+                        if (fObj.get("enabled").getAsBoolean()) {
+                            try {
+                                RegionFlag rf = RegionFlag.fromId(flagId);
+                                FlagState state = fObj.get("allowed").getAsBoolean() ? FlagState.ALLOWED : FlagState.DENIED;
+                                region.getFlags().put(new BooleanFlag(rf, state, true));
+                            } catch (IllegalArgumentException e) {
+                                System.out.println("[Yawp] 알 수 없는 플래그 무시됨: " + flagId);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -656,6 +694,68 @@ public class YawpBlueBridge implements ModInitializer {
 
             if (removed) sendResponse(exchange, "{\"success\":true}", 200);
             else sendResponse(exchange, "{\"error\":\"멤버를 찾을 수 없음\"}", 404);
+        }
+    }
+
+    private void handlePasteMember(HttpExchange exchange) throws IOException {
+        try (InputStreamReader reader = new InputStreamReader(exchange.getRequestBody(), StandardCharsets.UTF_8)) {
+            JsonObject data = GSON.fromJson(reader, JsonObject.class);
+            String regionId = data.get("id").getAsString();
+            JsonElement membersElement = data.get("members");
+            JsonArray membersArray = (membersElement != null && membersElement.isJsonArray()) ? membersElement.getAsJsonArray() : null;
+
+            if (this.minecraftServer == null) {
+                sendResponse(exchange, "{\"error\":\"Server not ready\"}", 503);
+                return;
+            }
+
+            var cache = this.minecraftServer.services().nameToIdCache();
+
+            Map<UUID, String> memberIds = new HashMap<>();
+            if (membersArray != null) {
+                for (JsonElement element : membersArray) {
+                    var profileOpt = cache.get(element.getAsString());
+                    if (profileOpt.isEmpty()) continue;
+
+                    var profile = profileOpt.get();
+                    memberIds.put(profile.id(), profile.name());
+                }
+            }
+
+            // 모든 월드 순회하며 해당 지역 찾기
+            boolean found = false;
+            for (String dimId : this.minecraftServer.levelKeys().stream()
+                    .map(key -> key.identifier().toString()).toList()) {
+
+                var apiOpt = RegionManager.get().getDimRegionApiByKey(dimId);
+                if (apiOpt.isPresent() && apiOpt.get().hasLocal(regionId)) {
+                    IMarkableRegion region = apiOpt.get().getLocalRegion(regionId).orElseThrow();
+
+                    PlayerContainer memberGroup = region.getGroups().get("members");
+                    if (memberGroup == null) {
+                        memberGroup = new PlayerContainer("members");
+                        region.getGroups().put("members", memberGroup);
+                    }
+
+                    for (Map.Entry<UUID, String> entry : memberIds.entrySet()) {
+                        UUID uuid = entry.getKey();
+                        String name = entry.getValue();
+                        memberGroup.addPlayer(uuid, name);
+                    }
+                    RegionManager.get().saveAll();
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found) {
+                sendResponse(exchange, "{\"success\":true}", 200);
+            } else {
+                sendResponse(exchange, "{\"error\":\"해당 ID의 지역을 찾을 수 없습니다.\"}", 404);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendResponse(exchange, "{\"error\":\"서버 오류: " + e.getMessage() + "\"}", 500);
         }
     }
 
