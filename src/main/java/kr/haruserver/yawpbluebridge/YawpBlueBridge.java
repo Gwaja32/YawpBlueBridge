@@ -77,6 +77,7 @@ public class YawpBlueBridge implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             this.minecraftServer = server;
             startHttpServer();
+            TempInviteManager.setServer(server);
         });
 
         // ✅ 3. 서버 종료 시 HTTP 서버 및 스레드 풀 정지 (이걸 추가하세요!)
@@ -94,9 +95,12 @@ public class YawpBlueBridge implements ModInitializer {
                 this.apiExecutor.shutdownNow();
                 System.out.println("[YawpBlueBridge] API Thread Pool closed.");
             }
+            TempInviteManager.shutdown();
         });
 
+        TempInviteManager.init();
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> AuthCommand.register(dispatcher));
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> TempCommand.register(dispatcher));
     }
 
     private void startHttpServer() {
