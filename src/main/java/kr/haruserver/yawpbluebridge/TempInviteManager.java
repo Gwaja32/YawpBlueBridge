@@ -49,17 +49,17 @@ public class TempInviteManager {
     }
 
     // 새로운 임시 초대 추가 및 멤버권한 부여
-    public static void addInvite(MinecraftServer server, UUID targetUuid, String targetName, UUID ownerUuid, long minutes) {
+    public static void addInvite(MinecraftServer server, UUID targetUuid, String targetName, String areaId, long minutes) {
         long clampedMinutes = Math.max(1, Math.min(300, minutes));
 
-        TempInviteData newData = new TempInviteData(targetUuid, targetName, ownerUuid, clampedMinutes);
+        TempInviteData newData = new TempInviteData(targetUuid, targetName, areaId, clampedMinutes);
 
         // put()을 사용하므로 동일한 [Owner + Target] 키가 존재하면 기존 데이터를 완전히 대체(startTimeMillis 갱신)함
         invitesMap.put(newData.getCompositeKey(), newData);
         saveToFile();
 
         // 멤버 권한 보장 (이미 멤버여도 덮어씀)
-        applyMemberStatus(server, ownerUuid, targetUuid, targetName, true);
+        applyMemberStatus(server, areaId, targetUuid, targetName, true);
     }
 
     // 플레이어 접속 시 검사 로직
@@ -69,7 +69,7 @@ public class TempInviteManager {
         for (Map.Entry<String, TempInviteData> entry : invitesMap.entrySet()) {
             TempInviteData invite = entry.getValue();
             if (invite.getTargetUuid().equals(targetUuid) && invite.isExpired()) {
-                applyMemberStatus(serverInstance, invite.getOwnerUuid(), invite.getTargetUuid(), invite.getTargetName(), false);
+                applyMemberStatus(serverInstance, invite.getAreaId(), invite.getTargetUuid(), invite.getTargetName(), false);
                 invitesMap.remove(entry.getKey());
                 changed = true;
             }
@@ -91,10 +91,15 @@ public class TempInviteManager {
 
             if (invite.isExpired()) {
                 serverInstance.execute(() ->
-                        applyMemberStatus(serverInstance, invite.getOwnerUuid(), invite.getTargetUuid(), invite.getTargetName(), false)
+                        applyMemberStatus(serverInstance, invite.getAreaId(), invite.getTargetUuid(), invite.getTargetName(), false)
                 );
                 invitesMap.remove(entry.getKey());
                 changed = true;
+            } else {
+                if (!existArea(invite.getAreaId())) {
+                    invitesMap.remove(entry.getKey());
+                    changed = true;
+                }
             }
         }
 
@@ -104,46 +109,48 @@ public class TempInviteManager {
     }
 
     // YAWP 영역 멤버 추가 / 제거 공통 로직
-    private static void applyMemberStatus(MinecraftServer server, UUID ownerUuid, UUID targetUuid, String targetName, boolean add) {
-        List<IMarkableRegion> ownedRegions = getOwnedRegionsFast(ownerUuid);
-
-        for (IMarkableRegion region : ownedRegions) {
-            PlayerContainer memberGroup = region.getGroups().get("members");
-            if (memberGroup == null) {
-                memberGroup = new PlayerContainer("members");
-                region.getGroups().put("members", memberGroup);
-            }
-
-            if (add) {
-                memberGroup.addPlayer(targetUuid, targetName);
-            } else {
-                memberGroup.removePlayer(targetUuid);
-            }
-        }
-        RegionManager.get().saveAll();
-    }
-
-    private static List<IMarkableRegion> getOwnedRegionsFast(UUID playerUuid) {
-        List<IMarkableRegion> ownedRegions = new ArrayList<>();
+    private static void applyMemberStatus(MinecraftServer server, String areaId, UUID targetUuid, String targetName, boolean add) {
 
         for (String levelName : RegionManager.get().getLevelNames()) {
             var apiOpt = RegionManager.get().getDimRegionApiByKey(levelName);
             if (apiOpt.isPresent()) {
                 var api = apiOpt.get();
 
-                for (IMarkableRegion region : api.getAllLocalRegions()) {
-                    PlayerContainer ownerGroup = region.getGroups().get("owners");
+                IMarkableRegion region = api.getLocalRegion(areaId).orElseThrow();
+                PlayerContainer memberGroup = region.getGroups().get("members");
 
-                    if (ownerGroup != null && ownerGroup.getPlayers() != null) {
-                        if (ownerGroup.getPlayers().containsKey(playerUuid)) {
-                            ownedRegions.add(region);
-                        }
-                    }
+                if (memberGroup == null) {
+                    memberGroup = new PlayerContainer("members");
+                    region.getGroups().put("members", memberGroup);
+                }
+
+                if (add) {
+                    memberGroup.addPlayer(targetUuid, targetName);
+                } else {
+                    memberGroup.removePlayer(targetUuid);
+                }
+
+                break;
+            }
+        }
+
+        RegionManager.get().saveAll();
+    }
+
+    private static boolean existArea(String areaId) {
+
+        for (String levelName : RegionManager.get().getLevelNames()) {
+            var apiOpt = RegionManager.get().getDimRegionApiByKey(levelName);
+            if (apiOpt.isPresent()) {
+                var api = apiOpt.get();
+
+                if (api.getLocalRegion(areaId).isPresent()) {
+                    return true;
                 }
             }
         }
 
-        return ownedRegions;
+        return false;
     }
 
     // 파일 저장/로드

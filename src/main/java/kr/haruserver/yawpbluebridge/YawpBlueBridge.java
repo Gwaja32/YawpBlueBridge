@@ -32,6 +32,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Filter;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.filter.AbstractFilter;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.*;
@@ -66,6 +71,23 @@ public class YawpBlueBridge implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        Logger rootLogger = (Logger) LogManager.getRootLogger();
+        rootLogger.addFilter(new AbstractFilter() {
+            @Override
+            public Filter.Result filter(LogEvent event) {
+                if (event.getMessage() != null) {
+                    String message = event.getMessage().getFormattedMessage();
+
+                    // 존재하지 않는 유저 조회 시 출력되는 Mojang/Minecraft 예외 문구 차단
+                    if (message.contains("Couldn't find profile with name") ||
+                            message.contains("MinecraftClientHttpException")) {
+                        return Filter.Result.DENY; // 콘솔 및 로그 파일 출력 원천 차단
+                    }
+                }
+                return Filter.Result.NEUTRAL; // 다른 모든 로그는 정상 출력
+            }
+        });
+
         // 1. 블루맵 연결 설정
         BlueMapAPI.onEnable(api -> {
             this.setBlueMapApi(api);
