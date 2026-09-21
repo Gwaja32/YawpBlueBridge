@@ -153,6 +153,11 @@ public class TempInviteManager {
         return false;
     }
 
+    public static boolean isTempMember(String areaId, UUID targetUuid) {
+        String key = areaId + "_" + targetUuid.toString();
+        return invitesMap.containsKey(key);
+    }
+
     // 파일 저장/로드
     private static synchronized void saveToFile() {
         try {
